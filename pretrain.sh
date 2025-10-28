@@ -4,7 +4,7 @@ method='commit'
 # R2R
 if [ $1 = "R2R" ]; then
     echo "Pretrain on R2R."
-    python src/main.py --log \
+    python3 src/main.py --log \
         --method $method \
         --description 'pretrain,R2R,MLM,CLIP' \
         --mask_visited \
@@ -33,7 +33,7 @@ fi
 # Note that text encoder is replaced with the multilingual XLMRoBERTa
 if [ $1 = "RxR" ]; then
     echo "Pretrain on RxR."
-    python src/main.py --log \
+    python3 src/main.py --log \
         --method $method \
         --description 'pretrain,RxR,MLM,CLIP' \
         --mask_visited \

@@ -15,10 +15,11 @@ FEATURE_PATH = './data/img_features/ViT-patch16-224-CLIP.pkl'
 CANDIDATE_BUFFER_PATH = './data/candidate_buffer.pkl'
 
 
-BERT_DIR = '/home/lurenjie/documents/pretrained/bert-base-uncased'
-BERT_TOKENIZER_DIR = '/home/lurenjie/documents/pretrained/bert-base-uncased-tokenizer'
-XLM_ROBERTA_DIR = '/home/lurenjie/documents/pretrained/xlm-roberta-base'
-CLIP_DIR = '/home/lurenjie/documents/pretrained/clip-vit-base-patch16'
+BERT_DIR = '/home/xiehaoxiang/Documents/pretrained/bert-base-uncased'
+# BERT_TOKENIZER_DIR = '/home/xiehaoxiang/Documents/pretrained/bert-base-uncased-tokenizer'
+BERT_TOKENIZER_DIR = '/home/xiehaoxiang/Documents/pretrained/bert-base-uncased' 
+XLM_ROBERTA_DIR = '/home/xiehaoxiang/Documents/pretrained/xlm-roberta-base'
+CLIP_DIR = '/home/xiehaoxiang/Documents/pretrained/clip-vit-base-patch16'
 ALBEF_PATH = './data/pretrained_model/ALBEF_refCOCO+.pt'
 
 

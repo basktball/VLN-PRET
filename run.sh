@@ -7,7 +7,7 @@ if [ $1 = "R2R" ]; then
     echo "====R2R===="
     # --not_load_strict \
     # --evaluate_first \
-    python src/main.py --log \
+    python3 src/main.py --log \
         --method $method \
         --description 'R2R,MLM,CLIP,' \
         --mask_visited \
@@ -30,7 +30,7 @@ if [ $1 = "R2R" ]; then
         --log_every 1000 \
         --loss_weight 0.2 \
         --max_step 15 \
-        --load 'temp/log/commit/2024-02-27_21:50:24_pretrain,R2R,MLM,CLIP'
+        --load 'log/commit/2025-10-15_11:22:06_pretrain,R2R,MLM,CLIP'
         # --load 'log/commit/2024-03-01_15:03:33_R2R,MLM,CLIP'
 fi
 
@@ -42,7 +42,7 @@ fi
 if [ $1 = "RxR" ]; then
     echo "====RxR===="
     # --evaluate_first \
-    python src/main.py --log \
+    python3 src/main.py --log \
         --method $method \
         --description 'RxR,bs4,MLM,CLIP,' \
         --mask_visited \

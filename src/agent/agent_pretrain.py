@@ -36,6 +36,7 @@ class AgentPretrain(nn.Module):
             path_id, text_ids, history_panorama, history_candidates_list, history_teacher_selection_list, history_length = batch
             path_id = path_id.cuda()
             text_ids = text_ids.cuda()
+            # history(B, max_history_length, 768)
             history, history_padding_mask = self.forward_history(history_panorama, history_candidates_list, history_teacher_selection_list, history_length)
             if self.training:
                 loss = self._forward_MLM(text_ids, history, history_padding_mask)
@@ -83,10 +84,12 @@ class AgentPretrain(nn.Module):
         all_candidate_features = pad_sequence(all_candidates, batch_first=True).cuda()  # (B * history_length, max_candidate_num, 768)
         padding_mask = utils.length_to_mask(all_candidate_num, device=all_candidate_features.device)  # (B * history_length, max_candidate_num)
 
-        # forward OPE
+        # forward OPE 
+        # (B * history_length, max_candidate_num, 768)原始方向角度；当前时刻全景视觉上下文；与其它方向的关系；Transformer 的语义融合结果。
         all_candidate_features = self.model.forward_OPE(all_candidate_features, history_panorama, padding_mask)
         if self.use_directed:
-            all_candidate_features = F.pad(all_candidate_features, (0, 0, 1, 0))  # add STOP embedding, 方便index选择
+            all_candidate_features = F.pad(all_candidate_features, (0, 0, 1, 0))  # add STOP embedding, 
+        #每个样本都有自己的一段时间序列，每步有 6 个候选方向（含 STOP），每个方向是一个 768 维特征向量。
         batch_candidate_features = torch.split(all_candidate_features, history_length.tolist(), dim=0)  # list[Tensor(history_length, max_candidate_num, 768)]
 
         # gather history features.
@@ -102,7 +105,9 @@ class AgentPretrain(nn.Module):
             else:
                 history_feature = history_candidate_features.mean(dim=1)  # average of 36 image feature
                 history_feature[-1, :] = 0  # the last token is the stop token
+            # 收集所有样本的历史特征
             history_features.append(history_feature)
+        #pad_sequence 填充到统一长度
         history_features = pad_sequence(history_features, batch_first=True)
         padding_mask = utils.length_to_mask(history_length.tolist(), device=history_features.device)
         return history_features, padding_mask
@@ -115,17 +120,20 @@ class AgentPretrain(nn.Module):
             history_length: (B, N)
         """
         attention_mask = (text_ids != 0).float()
+        # 替换后文本（部分词变为 [MASK]），哪些位置被 mask 了，被遮蔽位置的原始正确 token ID
         masked_text_ids, masked_mask, masked_ids = utils.MLM(
             text_ids, attention_mask,
             sep_token_id=self.tok.sep_token_id,
             mask_token_id=self.tok.mask_token_id,
             vocab_size=self.tok.vocab_size)
+        #每个 token 的上下文特征（语义 embedding）(B, L, C)
         text_features = self.model.text_model.forward_text(masked_text_ids, attention_mask)
 
         history_mask = (~history_padding_mask).float()
         tokens = self.model.text_model.forward_fusion(text_features, history, attention_mask, history_mask).last_hidden_state
 
         logits = self.mlm_head(tokens[masked_mask])  # (masked_num, vocab_size)
+        #计算预测分布与真实标签之间的交叉熵损失。
         if self.training:
             loss = F.cross_entropy(logits, masked_ids)
             return loss
