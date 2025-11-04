@@ -30,7 +30,7 @@ if [ $1 = "R2R" ]; then
         --log_every 1000 \
         --loss_weight 0.2 \
         --max_step 15 \
-        --load 'log/commit/2025-10-15_11:22:06_pretrain,R2R,MLM,CLIP'
+        --load 'log/commit/2025-11-02_20:49:06_pretrain,R2R,MLM,CLIP'
         # --load 'log/commit/2024-03-01_15:03:33_R2R,MLM,CLIP'
 fi
 

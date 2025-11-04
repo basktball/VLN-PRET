@@ -56,7 +56,7 @@ def main(rank, world_size, args):
     # load trained agent
     if args.load:
         print('Loading model from', args.load)
-        agent.load(args.load, strict=not args.not_load_strict)
+        agent.load(args.load, strict=args.not_load_strict)
     agent = agent.to('cuda' if torch.cuda.is_available() else 'cpu')
 
     # create Trainer, use different trainer to support different task

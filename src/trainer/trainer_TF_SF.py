@@ -166,6 +166,8 @@ class TrainerTFSF(TrainerBase):
             f'best iteration: {best_iteration}\n'
             f'best result:\n{best_result}')
         self.log(f'Time consuming: {str(datetime.now() - start_time)}')
+        print(f"log_dir = {self.log_dir}, rank = {self.rank}")
+
 
         # testing
         if self.log_dir is not None and self.rank == 0:
@@ -174,13 +176,19 @@ class TrainerTFSF(TrainerBase):
             agent.load(self.log_dir)
 
             print('\n\nStart testing')
+            self.log(f'\n\nStart testing')
             test_loader, length = self._get_dataloader('test', batch_size)
             all_result = self.evaluate(test_loader, length)
             all_result = self._reduce(all_result) if self.distributed else all_result
+            split_result[split] = all_result
+            metrics = evaluator.evaluate(all_result)  # dict
+            message = ', '.join(f'{key} {value: .4f}' for key, value in metrics.items())
+            self.log(f'{split}: {message}')
             save_path = osp.join(self.log_dir, f'trajectory_test.json')
             with open(save_path, 'w') as f:
                 json.dump(all_result, f)
             print('Finished testing')
+            self.log(f'Finished testing')
 
     @torch.no_grad()
     def evaluate(self, val_loader, length):
@@ -256,8 +264,6 @@ class TrainerTFSF(TrainerBase):
             if self.rank == 0:
                 print_progress()
         return all_result
-
-
 
 
 class EndlessGenerator:

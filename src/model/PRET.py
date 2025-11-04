@@ -5,7 +5,7 @@ from transformers import AutoTokenizer, AutoModelForMaskedLM, CLIPModel, CLIPPro
 
 import utils
 from config import BERT_TOKENIZER_DIR, BERT_DIR, ALBEF_PATH, XLM_ROBERTA_DIR, CLIP_DIR, device
-
+from torch.nn.utils.rnn import pad_sequence
 from .albef import ALBEF
 
 
@@ -44,6 +44,21 @@ class PRET(nn.Module):
 
         # MAM
         self.MAM = get_transformer_decoder(self.hidden_dim, self.nhead, self.MAM_layer_num)
+
+
+        self.ln_after = nn.LayerNorm(self.hidden_dim)
+        # 全局上下文 -> 残差注入的投影
+        self.ctx_proj = nn.Sequential(
+            nn.Linear(self.hidden_dim, self.hidden_dim),
+            nn.GELU(),
+            nn.Dropout(0.1)
+        )
+        self.ctx_alpha = nn.Parameter(torch.tensor(0.5))  # 可学习缩放，初值0.5
+
+        self.MAM_short = get_transformer_decoder(self.hidden_dim, self.nhead, layer_num=1)  # 快速响应
+        self.MAM_long  = get_transformer_decoder(self.hidden_dim, self.nhead, layer_num=3)  # 深层反思
+        self.gate_proj = nn.Linear(self.hidden_dim * 2, 1)
+
         self.cls = nn.Parameter(torch.zeros(1, 1, self.hidden_dim))
 
         # CCM
@@ -102,6 +117,117 @@ class PRET(nn.Module):
             candidate_feature = self.dropout(candidate_feature)
             tokens = self.vision_embedding(candidate_feature)  # (B, candidate_num, 768)
         return tokens
+
+    # def forward_MAM(self,
+    #         text_features,
+    #         text_padding_mask,
+    #         path_features,
+    #         path_padding_mask,
+    #         local_features=None,
+    #         local_padding_mask=None,):
+    #     B, N, C = path_features.shape
+    #     path_only = local_features is None
+    #     if path_only:
+    #         local_features = torch.zeros(B, 0, C, device=path_features.device)
+    #         local_padding_mask = torch.zeros(B, 0, dtype=torch.bool, device=path_features.device)
+
+    #     assert text_padding_mask.dtype == torch.bool
+    #     assert path_padding_mask.dtype == torch.bool
+    #     assert local_padding_mask.dtype == torch.bool
+
+    #     B, M, C = local_features.shape
+    #     # ============================================================
+    #     # ① 层级记忆：短期 + 长期 Transformer
+    #     # ============================================================
+    #     if N >= 2:
+    #         valid_mask = ~path_padding_mask
+    #         valid_mask_f = valid_mask.unsqueeze(-1).float()
+    #         lengths = valid_mask.sum(dim=1).long()
+
+    #         # ---- 短期记忆 ----
+    #         k = 2
+    #         short_memory_list = []
+    #         for b in range(B):
+    #             kk = min(k, lengths[b].item())
+    #             if kk > 0:
+    #                 short_memory_list.append(path_features[b, lengths[b]-kk:lengths[b], :])
+    #             else:
+    #                 short_memory_list.append(torch.zeros(1, C, device=device))
+    #         short_memory = pad_sequence(short_memory_list, batch_first=True)  # (B, ≤2, C)
+
+    #         # ---- 长期记忆 (Attention Pooling) ----
+    #         attn_score = F.softmax(
+    #             torch.bmm(path_features, path_features.mean(dim=1, keepdim=True).transpose(1, 2)) / (C ** 0.5),
+    #             dim=1
+    #         )  # (B, N, 1)
+    #         long_memory = torch.bmm(attn_score.transpose(1, 2), path_features)  # (B, 1, C)
+
+    #         # ---- Transformer 快 / 慢思考 ----
+    #         short_tokens = self.MAM_short(
+    #             tgt=short_memory,
+    #             memory=text_features,
+    #             memory_key_padding_mask=text_padding_mask
+    #         )
+    #         long_tokens  = self.MAM_long(long_memory,  text_features)   # (B, 1, C)
+
+    #         # ---- Cross-Fusion: 短期 Query → 长期 Key/Value ----
+    #         q = short_tokens
+    #         k = long_tokens.expand(B, q.size(1), C)
+    #         v = long_tokens.expand(B, q.size(1), C)
+    #         attn = F.softmax(torch.bmm(q, k.transpose(1, 2)) / (C ** 0.5), dim=-1)
+    #         fused_short = torch.bmm(attn, v)  # (B, k, C)
+
+    #         # ---- 多维 Gate (B,1,C) ----
+    #         gate = torch.sigmoid(
+    #             self.gate_proj(torch.cat([
+    #                 fused_short.mean(1), long_tokens.squeeze(1)
+    #             ], dim=-1))
+    #         ).unsqueeze(1)  # (B,1,C)
+
+    #         # ---- 残差注入：用 attention 分布注入全局语义 ----
+    #         path_fused = gate * fused_short.mean(1, keepdim=True) + (1 - gate) * long_tokens  # (B,1,C)
+    #         alpha = torch.sigmoid(self.ctx_alpha)
+    #         attn_ctx = F.softmax(torch.bmm(path_features, path_fused.transpose(1, 2)) / (C ** 0.5), dim=1)
+    #         ctx = attn_ctx * path_fused  # (B,N,C)
+    #         path_features = path_features + alpha * ctx
+    #         path_features = self.ln_after(path_features)
+
+    #     pos = torch.arange(N, device=path_features.device)
+    #     pe = position_embedding(pos, dim=C)
+    #     path_features = path_features + pe
+
+    #     pe = position_embedding(torch.tensor([N], device=local_features.device), dim=C)
+    #     local_features[:, 1:, :] = local_features[:, 1:, :] + pe  # add position embedding except STOP
+
+    #     # prepare inputs, cls is used as start token
+    #     cls = self.cls.expand(B, 1, -1)
+    #     falses = torch.zeros(B, cls.shape[1], dtype=torch.bool, device=cls.device)
+    #     tokens = torch.cat([cls, path_features, local_features], dim=1)
+    #     padding_mask = torch.cat([falses, path_padding_mask, local_padding_mask], dim=1)
+
+    #     # prepare merged causal mask
+    #     mask = torch.zeros(tokens.shape[1], tokens.shape[1], dtype=torch.bool, device=device)
+    #     i = N + cls.shape[1]  # +1 for cls
+    #     j = i + M
+    #     mask[i:, :] = True
+    #     mask[:i, :i] = utils.get_causal_mask(i).to(tokens.device)
+    #     mask[i:j, i:j] = torch.eye(local_features.shape[1], dtype=torch.bool, device=device)
+    #     mask = ~mask
+
+    #     # forward
+    #     tokens = self.MAM(
+    #         tokens, text_features,
+    #         tgt_mask=mask,
+    #         tgt_key_padding_mask=padding_mask,
+    #         memory_key_padding_mask=text_padding_mask)
+
+    #     # return
+    #     cls, path_tokens, local_tokens = torch.split(tokens, [cls.shape[1], N, M], dim=1)
+    #     if path_only:
+    #         return path_tokens
+    #     else:
+    #         return path_tokens, local_tokens
+
 
     def forward_MAM(self,
             text_features,
